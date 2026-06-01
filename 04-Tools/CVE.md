@@ -86,5 +86,3 @@ Check:
 Never blindly execute unknown code.
 
 ---
-
-Reporting
